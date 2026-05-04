@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rosh-mcp"
+version = "0.1.0"
+description = "MCP server for Rosh — give any AI the power to create interactive web apps, games, and 3D scenes"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Rosh Studio", email = "hello@rosh.cloud" },
+]
+keywords = ["mcp", "rosh", "ai", "creative-coding", "game-development", "3d"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Games/Entertainment",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.25.0",
+]
+
+[project.scripts]
+rosh-mcp = "rosh_mcp.server:main"
+
+[project.urls]
+Homepage = "https://rosh.cloud"
+Repository = "https://github.com/rosh-studio/rosh-mcp"
+Documentation = "https://rosh.cloud/api"
