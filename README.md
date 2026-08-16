@@ -46,14 +46,14 @@ Same config format — add to your MCP settings file.
 2. Go to Settings → API Keys
 3. Create a key with `read,write` scopes
 
-> **Note:** `rosh_docs` and `rosh_compile` work without an API key. You only need a key for publishing.
+> **Note:** All tools require an API key — set `ROSH_API_KEY` before starting the server.
 
 ## Tools
 
 | Tool | Description | Auth Required |
 |------|-------------|---------------|
-| `rosh_docs` | Get the full Rosh language reference | No |
-| `rosh_compile` | Compile Rosh code to HTML | No |
+| `rosh_docs` | Get the full Rosh language reference | Yes (read) |
+| `rosh_compile` | Compile Rosh code to HTML | Yes (read) |
 | `rosh_publish` | Publish a program to rosh.cloud | Yes (write) |
 | `rosh_list_programs` | List your programs | Yes (read) |
 | `rosh_get_program` | Get program details by ID | Yes (read) |
@@ -75,7 +75,7 @@ Try these with any MCP-capable AI:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ROSH_API_KEY` | For publishing | — | Your rosh.cloud API key |
+| `ROSH_API_KEY` | Yes | — | Your rosh.cloud API key |
 | `ROSH_API_BASE` | No | `https://rosh.cloud` | API base URL |
 
 ## Development
