@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rosh-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for Rosh — give any AI the power to create interactive web apps, games, and 3D scenes"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "httpx>=0.25.0",
 ]
 
