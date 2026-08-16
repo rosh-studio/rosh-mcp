@@ -6,7 +6,7 @@ Lets any MCP-capable AI tool (Claude Desktop, Claude Code, Cursor, Windsurf,
 etc.) compile, publish, browse, and moderate Rosh programs directly.
 
 Environment variables:
-    ROSH_API_KEY   — rosh.cloud API key (required for publishing; optional for compile/docs)
+    ROSH_API_KEY   — rosh.cloud API key (required for all tools, including compile/docs)
     ROSH_API_BASE  — API base URL (default: https://rosh.cloud)
 """
 
@@ -53,9 +53,12 @@ def _api_safe(method: str, path: str, data: dict | None = None) -> str:
         body = e.response.text
         try:
             detail = json.loads(body)
-            return json.dumps({"error": True, "status": e.response.status_code, "detail": detail}, indent=2)
         except json.JSONDecodeError:
-            return json.dumps({"error": True, "status": e.response.status_code, "detail": body[:500]}, indent=2)
+            detail = body[:500]
+        result = {"error": True, "status": e.response.status_code, "detail": detail}
+        if e.response.status_code == 401:
+            result["hint"] = "Set the ROSH_API_KEY environment variable to a valid rosh.cloud API key (Settings -> API Keys at rosh.cloud)."
+        return json.dumps(result, indent=2)
     except Exception as e:
         return json.dumps({"error": True, "detail": str(e)}, indent=2)
 
@@ -67,14 +70,14 @@ def rosh_docs() -> str:
     """Get the Rosh language documentation — keywords, widgets, targets, and examples.
 
     Returns the full language reference including all 25 keywords, available widgets,
-    compile targets (web, phaser, threejs), and example programs. No API key needed.
+    compile targets (web, phaser, threejs), and example programs. Requires ROSH_API_KEY.
     """
     return _api_safe("GET", "/api/v1/docs")
 
 
 @mcp.tool()
 def rosh_compile(code: str, target: str = "web") -> str:
-    """Compile Rosh code into a runnable HTML page. No API key needed.
+    """Compile Rosh code into a runnable HTML page. Requires ROSH_API_KEY.
 
     Rosh is a plain-English programming language. Example:
         create box called player at 400 300
