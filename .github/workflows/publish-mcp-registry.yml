@@ -1,0 +1,28 @@
+# Publish server.json to the official MCP Registry.
+# The registry accepts the rosh-studio namespace only from GitHub Actions (OIDC):
+# a personal `mcp-publisher login github` can't prove the organisation role (15 Nov 2026).
+# Runs on a version tag, or by hand (Actions -> Publish to MCP Registry -> Run workflow).
+name: Publish to MCP Registry
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mcp-publisher 1.8.9
+        run: |
+          curl -fsSL https://github.com/modelcontextprotocol/registry/releases/download/v1.8.9/mcp-publisher_linux_amd64.tar.gz | tar xz mcp-publisher
+          ./mcp-publisher --version
+      - name: Log in (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish
+        run: ./mcp-publisher publish
