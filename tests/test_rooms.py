@@ -306,3 +306,54 @@ def test_look_can_ask_for_some_things_by_name(room):
     out = json.loads(s.rosh_room_look(ref, names="pick_*, plinth"))
     assert set(out["things"]) == {"pick_1", "pick_2", "plinth"}
     assert out["count"] >= 3
+
+
+# ── Since the server fixes of 15 Nov (limits, doors, problems, delete) ──
+
+@live
+def test_values_beyond_the_limits_are_refused_with_the_range(room):
+    s, ref, slug = room
+    out = json.loads(s.rosh_room_do(ref, "set plinth.size to 1e9\nset plinth.opacity to 5", stop_on_refusal=False))
+    assert [r["reason"] for r in out["results"]] == ["out_of_range", "out_of_range"], out
+    assert "between 0.01 and 100" in out["results"][0]["message"]
+
+
+@live
+def test_an_owners_door_off_this_site_is_refused(room):
+    s, ref, slug = room
+    out = json.loads(s.rosh_room_do(ref, 'create object exit_x\nset exit_x.door_to to "https://example.com"'))
+    assert out["results"][1]["reason"] == "bad_door", out
+
+
+@live
+def test_starting_code_problems_come_back_on_create_and_in_look():
+    s = load()
+    slug = f"mcp-test-{uuid.uuid4().hex[:8]}"
+    made = json.loads(s.rosh_create_room(slug, "create object d\nset d.spin to 999\n"))
+    assert made["success"] and "spin must be between" in made["problems"][0]["error"], made
+    look = json.loads(s.rosh_room_look(made["room"]))
+    assert "spin" in json.dumps(look["code_problems"]) and "spin" not in look["things"]["d"]
+    assert json.loads(s.rosh_delete_room(slug))["deleted"]
+
+
+@live
+def test_a_room_can_be_deleted():
+    s = load()
+    slug = f"mcp-test-{uuid.uuid4().hex[:8]}"
+    made = json.loads(s.rosh_create_room(slug, "create object d\n"))
+    assert json.loads(s.rosh_delete_room(slug))["deleted"]
+    assert json.loads(s.rosh_room_look(made["room"]))["status"] == 404
+    assert json.loads(s.rosh_delete_room(slug))["status"] == 404
+
+
+def test_the_guide_limits_match_the_server_spec_when_it_is_here():
+    path = os.path.expanduser("~/dev/rosh/rosh-portal/rosh_limits.toml")
+    if not os.path.exists(path):
+        pytest.skip("server spec not on this machine")
+    import tomllib
+    limits = tomllib.load(open(path, "rb"))["room_values"]
+    guide = load(key="").ROOM_GUIDE
+    for prop in ("size", "opacity", "spin"):
+        lo, hi = limits[prop]
+        assert f"{lo:g} to {hi:g}" in guide, prop
+    assert f"{limits['x'][0]:g} to {limits['x'][1]:g}" in guide

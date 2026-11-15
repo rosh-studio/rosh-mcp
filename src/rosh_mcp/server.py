@@ -7,8 +7,8 @@ etc.) build live 3D rooms in Rosh without rendering anything (rosh_room_*), and
 compile, publish, browse and moderate Rosh programs.
 
 Environment variables:
-    ROSH_API_KEY   — rosh.cloud API key (all tools except rosh_room_guide; rosh_room_look
-                     works without one for public rooms)
+    ROSH_API_KEY   — rosh.cloud API key (not needed for rosh_room_guide or rosh_docs;
+                     rosh_room_look works without one for public rooms)
     ROSH_API_BASE  — API base URL (default: https://rosh.cloud)
 """
 
@@ -73,7 +73,9 @@ def rosh_docs() -> str:
     """Get the Rosh language documentation — keywords, widgets, targets, and examples.
 
     Returns the full language reference including all 25 keywords, available widgets,
-    compile targets (web, phaser, threejs), and example programs. Requires ROSH_API_KEY.
+    compile targets (web, phaser, threejs), and example programs. No key needed on
+    rosh.cloud since 15 Nov 2026 (older servers ask for ROSH_API_KEY). For rooms, read
+    rosh_room_guide instead.
     """
     return _api_safe("GET", "/api/v1/docs")
 
@@ -252,6 +254,11 @@ THE ROOM ITSELF (best in the room's starting code, rosh_create_room)
   set room.intro to "Four carved stones from north-east Scotland."
   set room.guide_1 to "Click a stone to read about it."
 
+LIMITS (a value outside is REFUSED with the range; nothing is clamped)
+  x and z: -500 to 500        y: -50 to 500         size: 0.01 to 100
+  spin, bounce, pulse: -20 to 20                     opacity: 0 to 1
+  A door may only lead to a room on this site (a path like /world/rosh/blocks).
+
 YOUR OWN FACTS
   A room keeps any property you set (set stone_1.year to 800), and refuses
   nothing for being unknown, but a near-typo of a real property (colr) is
@@ -270,7 +277,8 @@ WHO MAY CHANGE IT (visitors with the link, no key)
 
 STARTING CODE vs LIVE CHANGES
   rosh_create_room takes the room's starting code (the lines above, one per
-  line). rosh_room_do changes the live room. rosh_set_room_code replaces the
+  line). Lines that can't run are listed under "problems" in its reply (and
+  in rosh_room_look as code_problems); fix them with rosh_set_room_code. rosh_room_do changes the live room. rosh_set_room_code replaces the
   starting code; the live room keeps its changes until it is reset.
 """
 
@@ -428,7 +436,8 @@ def rosh_create_room(slug: str, code: str = "", name: Optional[str] = None) -> s
         if result.get("success"):
             result["room"] = f"{result['owner']}/{result['slug']}"
             result["url"] = f"{API_BASE}/world/{result['owner']}/{result['slug']}"
-            result["next"] = "Change it live with rosh_room_do; read it with rosh_room_look."
+            result["next"] = ("Change it live with rosh_room_do; read it with rosh_room_look."
+                              + (" Some starting lines didn't run: see problems." if result.get("problems") else ""))
         return json.dumps(result, indent=2)
     except Exception as e:  # noqa: BLE001
         return _error(e)
@@ -457,6 +466,20 @@ def rosh_set_room_code(slug: str, code: str) -> str:
     """
     try:
         return json.dumps(_api("PUT", f"/api/v1/worlds/{slug}", {"code": code}), indent=2)
+    except Exception as e:  # noqa: BLE001
+        return _error(e)
+
+
+@mcp.tool()
+def rosh_delete_room(slug: str) -> str:
+    """Permanently delete one of your rooms (not your main room). Requires an API key
+    with write scope. Everyone in it is sent out, and its link stops working.
+
+    Args:
+        slug: the room's slug (one of yours)
+    """
+    try:
+        return json.dumps(_api("DELETE", f"/api/v1/worlds/{slug}"), indent=2)
     except Exception as e:  # noqa: BLE001
         return _error(e)
 
@@ -549,6 +572,8 @@ def rosh_room_look(room: str, names: str = "") -> str:
     meta = state.get("meta") or {}
     if meta:
         out["room_settings"] = meta
+    if connected.get("seed_problems"):
+        out["code_problems"] = connected["seed_problems"]
     look = _room_look_lines(info.get("owner"), info.get("slug"))
     if look:
         out["room_look"] = look
