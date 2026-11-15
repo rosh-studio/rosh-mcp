@@ -220,8 +220,12 @@ PLACE AND SIZE (metres; y is up; the ground is y = 0)
   Leave y out: things stand on the ground. Set y only to lift something into
   the air (set lamp_1.y to 3); it is the height of the thing's middle, so a
   thing given y = 0 sinks halfway into the ground.
-  (There is no .position or .stretch property: use x, y, z and size. Size is
-  the same in every direction: there are no tall thin slabs yet.)
+  set stone_1.height to 2.5          # a plain shape's size along one axis, in
+  set stone_1.width to 0.8           # metres: height (up), width (left/right),
+  set stone_1.depth to 0.3           # depth (towards/away); each falls back to size
+  (Width, height and depth shape plain shapes: cube, sphere, cylinder, cone,
+  plane. Models and doors use size. There is no .position or .stretch: use x,
+  y, z, size, width, height and depth.)
 
 SEEING WITHOUT A SCREEN
   rosh_room_look returns layout_notes: things that overlap, things one behind
@@ -255,7 +259,7 @@ THE ROOM ITSELF (best in the room's starting code, rosh_create_room)
   set room.guide_1 to "Click a stone to read about it."
 
 LIMITS (a value outside is REFUSED with the range; nothing is clamped)
-  x and z: -500 to 500        y: -50 to 500         size: 0.01 to 100
+  x and z: -500 to 500        y: -50 to 500         size, width, height, depth: 0.01 to 100
   spin, bounce, pulse: -20 to 20                     opacity: 0 to 1
   A door may only lead to a room on this site (a path like /world/rosh/blocks).
 
@@ -602,20 +606,24 @@ def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
     import math
 
     placed = {}
+    tall: dict = {}
     for name, p in things.items():
         if str(p.get("visible", "true")).lower() == "false":
             continue
-        placed[name] = (_num(p.get("x")), _num(p.get("z")), max(_num(p.get("size"), 1.0), 0.1),
-                        bool(p.get("label")))
+        size = max(_num(p.get("size"), 1.0), 0.1)
+        # Across the ground: the wider of width and depth; up: height (each falls back to size).
+        across = max(_num(p.get("width"), size), _num(p.get("depth"), size), 0.1)
+        tall[name] = max(_num(p.get("height"), size), 0.1)
+        placed[name] = (_num(p.get("x")), _num(p.get("z")), across, bool(p.get("label")))
     notes: list[str] = []
     for name, p in sorted(things.items()):
         if p.get("y") is None or name not in placed:
             continue
-        y, size = _num(p.get("y")), placed[name][2]
-        if y < size / 2 - 0.01:
+        y, height = _num(p.get("y")), tall[name]
+        if y < height / 2 - 0.01:
             notes.append(f"{name} is partly underground: y = {y:g} is the height of its middle and it is "
-                         f"{size:g} across. Remove y to stand it on the ground (forget {name}.y), "
-                         f"or set y to at least {size / 2:g}.")
+                         f"{height:g} tall. Remove y to stand it on the ground (forget {name}.y), "
+                         f"or set y to at least {height / 2:g}.")
     names = sorted(placed)
     for i, a in enumerate(names):
         ax, az, asz, _ = placed[a]

@@ -74,9 +74,10 @@ def test_guide_needs_no_key_and_has_no_properties_rooms_ignore():
         assert prop in KNOWN or prop.startswith("guide_") or prop in {"title", "intro", "year", "source", "rules"} or prop.startswith("rule"), prop
 
 
-# What the server says a room reads (rosh-portal main.py _KNOWN_ROOM_PROPERTIES, 15 Nov 2026).
+# What the server says a room reads (rosh-portal main.py _KNOWN_ROOM_PROPERTIES, 15 Nov 2026; width/height/depth added that evening).
 KNOWN = {
-    "x", "y", "z", "visible", "color", "colour", "material", "scale", "size", "text", "font_size",
+    "x", "y", "z", "visible", "color", "colour", "material", "scale", "size", "width", "height", "depth",
+    "text", "font_size",
     "spin", "pulse", "bounce", "opacity", "patrol", "orbit", "cycle", "label", "label_lift", "label_size",
     "press", "on_click", "door_to", "does", "rule", "wireframe", "shape", "image", "description", "credit",
     "year", "period", "category", "curated", "spacing", "setting", "sky", "ground", "strict",
@@ -357,3 +358,25 @@ def test_the_guide_limits_match_the_server_spec_when_it_is_here():
         lo, hi = limits[prop]
         assert f"{lo:g} to {hi:g}" in guide, prop
     assert f"{limits['x'][0]:g} to {limits['x'][1]:g}" in guide
+
+
+def test_layout_notes_use_width_depth_and_height():
+    s = load()
+    # Two thin slabs side by side don't overlap, though their sizes would.
+    slabs = {"a": {"x": 0, "z": 0, "size": 3, "width": 0.4, "depth": 0.4},
+             "b": {"x": 1, "z": 0, "size": 3, "width": 0.4, "depth": 0.4}}
+    assert not any("overlap" in n for n in s._layout_notes(slabs, "0 1.7 12 -> 0 1.4 0"))
+    # A tall stone with y 1 is half underground by its height, not its size.
+    notes = " | ".join(s._layout_notes({"stone": {"x": 0, "z": 0, "y": 1, "size": 1, "height": 4}}, None))
+    assert "stone is partly underground" in notes and "4 tall" in notes
+
+
+@live
+def test_width_height_depth_are_kept_and_capped(room):
+    s, ref, slug = room
+    out = json.loads(s.rosh_room_do(ref, "create object slab_1\nset slab_1.height to 2.5\n"
+                                         "set slab_1.width to 0.8\nset slab_1.depth to 0.3\nset slab_1.height to 500",
+                                    stop_on_refusal=False))
+    assert [r["ok"] for r in out["results"]] == [True, True, True, True, False], out
+    slab = json.loads(s.rosh_room_look(ref, names="slab_1"))["things"]["slab_1"]
+    assert float(slab["height"]) == 2.5 and float(slab["width"]) == 0.8 and float(slab["depth"]) == 0.3
