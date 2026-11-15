@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.rosh-studio/rosh-mcp",
-  "description": "Give any AI the power to create interactive web apps, games, and 3D scenes using Rosh — a plain-English programming language",
+  "description": "AI agents build live 3D rooms in Rosh without rendering anything, and compile and publish Rosh programs",
   "repository": {
     "url": "https://github.com/rosh-studio/rosh-mcp",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "rosh-mcp",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       }

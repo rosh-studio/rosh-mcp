@@ -2,7 +2,15 @@
 
 <!-- mcp-name: io.github.rosh-studio/rosh-mcp -->
 
-Give any AI the power to create and publish interactive web apps, games, and 3D scenes using [Rosh](https://rosh.cloud) — a plain-English programming language.
+Let an AI agent build live 3D rooms in [Rosh](https://rosh.cloud) without
+rendering anything, and compile and publish Rosh programs.
+
+**Rooms (new in 0.2.0).** A room is a live 3D space on rosh.cloud. The agent
+writes Rosh lines; the room checks each one and confirms or refuses it with a
+reason; `rosh_room_look` reads the room back as text, with layout notes (things
+that overlap, things hidden behind others from where visitors stand, things
+underground). The agent never needs a screen. The same room is drawn live by
+the browser, and by the Unity and Unreal clients.
 
 ## What is Rosh?
 
@@ -44,11 +52,32 @@ Same config format — add to your MCP settings file.
 
 1. Create an account at [rosh.cloud](https://rosh.cloud)
 2. Go to Settings → API Keys
-3. Create a key with `read,write` scopes
+3. Create a key with `read,write,world` scopes (`world` lets it change rooms)
 
-> **Note:** All tools require an API key — set `ROSH_API_KEY` before starting the server.
+`rosh_room_guide` needs no key, and `rosh_room_look` works without one on public
+rooms; everything else needs `ROSH_API_KEY`.
 
 ## Tools
+
+### Rooms
+
+| Tool | Description | Auth Required |
+|------|-------------|---------------|
+| `rosh_room_guide` | The lines a room understands, with examples: read first | No |
+| `rosh_create_room` | Create a room from starting Rosh code | Yes (write) |
+| `rosh_list_rooms` | List your rooms | Yes (read) |
+| `rosh_room_do` | Send Rosh lines to a live room; each confirmed or refused | Yes (world) |
+| `rosh_room_look` | Read a room as text, with layout notes | No (public rooms) |
+| `rosh_set_room_code` | Replace a room's starting code | Yes (write) |
+
+A first brief to try: *"Build a small 3D room about Pictish stones for a school
+group of 10-year-olds at slug pictish-stones. You cannot see it: check it with
+rosh_room_look and fix its layout notes."*
+
+Limits: 20 new rooms an hour per key by default; rooms can't be deleted through
+the API yet.
+
+### Programs
 
 | Tool | Description | Auth Required |
 |------|-------------|---------------|

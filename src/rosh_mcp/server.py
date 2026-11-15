@@ -3,13 +3,16 @@
 Rosh MCP Server — Model Context Protocol wrapper for the rosh.cloud API.
 
 Lets any MCP-capable AI tool (Claude Desktop, Claude Code, Cursor, Windsurf,
-etc.) compile, publish, browse, and moderate Rosh programs directly.
+etc.) build live 3D rooms in Rosh without rendering anything (rosh_room_*), and
+compile, publish, browse and moderate Rosh programs.
 
 Environment variables:
-    ROSH_API_KEY   — rosh.cloud API key (required for all tools, including compile/docs)
+    ROSH_API_KEY   — rosh.cloud API key (all tools except rosh_room_guide; rosh_room_look
+                     works without one for public rooms)
     ROSH_API_BASE  — API base URL (default: https://rosh.cloud)
 """
 
+import contextlib
 import json
 import os
 from typing import Optional
@@ -27,7 +30,7 @@ API_KEY = os.environ.get("ROSH_API_KEY", "")
 
 def _headers() -> dict[str, str]:
     h = {
-        "User-Agent": "RoshMCP/0.1",
+        "User-Agent": "RoshMCP/0.2",
         "Content-Type": "application/json",
     }
     if API_KEY:
@@ -183,6 +186,440 @@ def rosh_show_program(identifier: str) -> str:
         identifier: Program ID (numeric) or slug (string)
     """
     return _api_safe("POST", f"/api/v1/programs/{identifier}/show")
+
+
+# ── Rooms: live 3D spaces built in Rosh, drawn by any renderer ──
+#
+# A room lives on rosh.cloud. The browser, Unity, Unreal and the terminal all
+# draw the same live room; an agent needs none of them. It writes Rosh, the
+# room checks each line and confirms or refuses it, and `look` reads the room
+# back as text.
+
+ROOM_GUIDE = """\
+ROSH ROOMS: a short guide for agents (rosh-mcp)
+
+A room is a live 3D space on rosh.cloud. You change it by sending Rosh lines
+(rosh_room_do); the room checks each one and says CONFIRMED or REFUSED with a
+reason. rosh_room_look returns everything in it as text. Anyone with the room's
+link sees the same room, live, in a browser (and in Unity or Unreal clients).
+
+WRITE ROSH, NOT ENGLISH. The room reads plain English loosely and may drop words
+("a tall stone next to the plinth" makes a plain cube). Spell out each property.
+
+MAKE AND REMOVE
+  create object stone_1              # a new thing; names: letters, digits, _ and -
+                                     # (not a bare word like "a" or "the")
+  destroy stone_1
+
+PLACE AND SIZE (metres; y is up; the ground is y = 0)
+  set stone_1.x to 3                 # left/right
+  set stone_1.z to -2                # towards/away
+  set stone_1.size to 2              # 1 is about a metre across
+  Leave y out: things stand on the ground. Set y only to lift something into
+  the air (set lamp_1.y to 3); it is the height of the thing's middle, so a
+  thing given y = 0 sinks halfway into the ground.
+  (There is no .position or .stretch property: use x, y, z and size. Size is
+  the same in every direction: there are no tall thin slabs yet.)
+
+SEEING WITHOUT A SCREEN
+  rosh_room_look returns layout_notes: things that overlap, things one behind
+  another from where visitors stand (their signs pile up), and things outside
+  the first view. Fix each note, then look again.
+
+LOOK
+  set stone_1.shape to cylinder      # cube, sphere, cylinder, cone, torus, plane
+  set stone_1.color to grey          # a colour name or #rrggbb
+  set stone_1.opacity to 0.5
+  set stone_1.wireframe to true
+  set stone_1.label to "Pictish stone"   # a sign above it
+  set stone_1.description to "Carved about 800 AD."   # shown when clicked
+
+MOVEMENT
+  set stone_1.spin to 1              # turns; 0 stops
+  set stone_1.bounce to 1
+  set stone_1.pulse to 1
+
+DOORS
+  create object door_1
+  set door_1.door_to to "/world/<owner>/<other-room>"
+  set door_1.label to "To the garden"
+
+THE ROOM ITSELF (best in the room's starting code, rosh_create_room)
+  # sky: #87b7d8                     # header lines at the top of the code
+  # ground: #47703a
+  # camera: 8 1.8 14 -> 0 1.4 0      # where a visitor stands -> looks
+  set room.title to "Pictish stones"
+  set room.intro to "Four carved stones from north-east Scotland."
+  set room.guide_1 to "Click a stone to read about it."
+
+YOUR OWN FACTS
+  A room keeps any property you set (set stone_1.year to 800), and refuses
+  nothing for being unknown, but a near-typo of a real property (colr) is
+  flagged. Never invent facts about real objects; say where a fact came from
+  (set stone_1.source to "...").
+
+WHO MAY CHANGE IT (visitors with the link, no key)
+  Things you add live with rosh_room_do are yours: visitors can't change or
+  remove them. Things in the starting code belong to the room:
+  - a new room is "shared": visitors may add their own things, and may move,
+    recolour or relabel the room's things, but not remove them;
+  - with `set room.rules to museum` in the starting code, visitors can't add
+    things or change labels and records; they may still move and recolour;
+  - with `set room.rule.build to 9` in the starting code, visitors may only
+    look (levels are numbers: 0 look, 3 build, 5 edit, 9 own).
+
+STARTING CODE vs LIVE CHANGES
+  rosh_create_room takes the room's starting code (the lines above, one per
+  line). rosh_room_do changes the live room. rosh_set_room_code replaces the
+  starting code; the live room keeps its changes until it is reset.
+"""
+
+
+def _room_ref(room: str) -> tuple[str, str]:
+    """'owner/slug', '@owner/slug' or a rosh.cloud room link -> (owner, slug)."""
+    text = room.strip().rstrip("/")
+    if "://" in text:
+        text = text.split("://", 1)[1].split("/", 1)[-1]
+    parts = [p for p in text.split("/") if p]
+    if parts and parts[0] == "world":
+        parts = parts[1:]
+    if len(parts) != 2:
+        raise ValueError(f"Can't read the room {room!r}: give 'owner/slug' or the room's link.")
+    return parts[0].lstrip("@"), parts[1]
+
+
+@contextlib.contextmanager
+def _room_socket(room: str):
+    """The room's live socket, opened with the API key: yields (socket, room info, CONNECTED message)."""
+    from websockets.sync.client import connect
+
+    owner, slug = _room_ref(room)
+    info = _api("GET", f"/api/v1/world/{owner}/{slug}")
+    ws_url = info["ws_url"]
+    # The server names its own public address; when talking to a local or
+    # relayed server, keep the address this client was given.
+    base = API_BASE.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = base + ws_url[ws_url.index("/ws/"):]
+    headers = {"User-Agent": "RoshMCP/0.2"}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+    with connect(ws_url, additional_headers=headers, open_timeout=20, max_size=32 * 1024 * 1024) as ws:
+        while True:
+            message = json.loads(ws.recv(timeout=15))
+            if message.get("type") == "CONNECTED":
+                break
+        yield ws, info, message
+
+
+def _await_answer(ws, request_id: str, timeout: float = 20.0) -> tuple[dict | None, list[str]]:
+    """Read until the room confirms or refuses this request; collect anything it says."""
+    import time
+
+    said: list[str] = []
+    end = time.monotonic() + timeout
+    while True:
+        left = end - time.monotonic()
+        if left <= 0:
+            return None, said
+        try:
+            message = json.loads(ws.recv(timeout=left))
+        except TimeoutError:
+            return None, said
+        if message.get("request_id") != request_id:
+            continue
+        kind = message.get("type")
+        if kind in ("SAY", "NOTE"):
+            text = message.get("text") or message.get("message")
+            if text:
+                said.append(text)
+            continue
+        if kind in ("CONFIRMED_ROSH", "REJECTED"):
+            return message, said
+
+
+def _brief_answer(line: str, answer: dict | None, said: list[str]) -> dict:
+    if answer is None:
+        return {"line": line, "ok": False, "reason": "no_answer",
+                "message": "The room didn't answer within 20 seconds."}
+    out: dict = {"line": line, "ok": answer.get("type") == "CONFIRMED_ROSH"}
+    if out["ok"]:
+        ran = answer.get("command")
+        if ran and ran.strip() != line.strip():
+            out["ran"] = ran  # what the room read the line as
+        delta = answer.get("state_delta") or {}
+        for key in ("created", "updated"):
+            if delta.get(key):
+                out[key] = sorted(delta[key])
+        if delta.get("deleted"):
+            out["deleted"] = sorted(delta["deleted"])
+        if not any(k in out for k in ("created", "updated", "deleted")) and "inspection" not in answer:
+            out["note"] = "Confirmed, but nothing in the room changed."
+        if "inspection" in answer:
+            out["inspection"] = answer["inspection"]
+        for key in ("message", "note", "warning"):
+            if answer.get(key) and key not in out:
+                out[key] = answer[key]
+    else:
+        out["reason"] = answer.get("reason")
+        out["message"] = answer.get("message")
+        if answer.get("suggestions"):
+            out["suggestions"] = answer["suggestions"]
+    if said:
+        out["said"] = said
+    return out
+
+
+def _brief_things(objects: dict) -> dict:
+    """The room's things without bookkeeping fields."""
+    hidden = {"uuid", "type", "object_type", "created_by"}
+    return {name: {k: v for k, v in (props or {}).items() if k not in hidden}
+            for name, props in sorted(objects.items())}
+
+
+def _error(e: Exception) -> str:
+    if isinstance(e, httpx.HTTPStatusError):
+        try:
+            detail = e.response.json()
+        except ValueError:
+            detail = e.response.text[:500]
+        return json.dumps({"error": True, "status": e.response.status_code, "detail": detail}, indent=2)
+    return json.dumps({"error": True, "detail": f"{type(e).__name__}: {e}"}, indent=2)
+
+
+@mcp.tool()
+def rosh_room_guide() -> str:
+    """How to build a Rosh room: the lines a room understands, with examples. Read this first.
+
+    No API key needed. Rooms are live 3D spaces on rosh.cloud, built by sending Rosh lines;
+    you never need to see or render them.
+    """
+    return ROOM_GUIDE
+
+
+@mcp.tool()
+def rosh_create_room(slug: str, code: str = "", name: Optional[str] = None) -> str:
+    """Create a new room from starting Rosh code. Requires an API key with write scope.
+
+    Read rosh_room_guide first for the lines a room understands. The result's "url" is
+    the room's address (give that one, not a guess); anyone with the link can see it.
+
+    Args:
+        slug: the room's address part: lowercase letters, digits and hyphens, e.g. "pictish-stones"
+        code: the room's starting Rosh code, one line per statement (may be empty)
+        name: the room's display name (defaults to the slug)
+    """
+    try:
+        result = _api("POST", "/api/v1/worlds", {"slug": slug, "name": name or slug, "code": code,
+                                                 "render_target": "threejs"})
+        if result.get("success"):
+            result["room"] = f"{result['owner']}/{result['slug']}"
+            result["url"] = f"{API_BASE}/world/{result['owner']}/{result['slug']}"
+            result["next"] = "Change it live with rosh_room_do; read it with rosh_room_look."
+        return json.dumps(result, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return _error(e)
+
+
+@mcp.tool()
+def rosh_list_rooms() -> str:
+    """List the rooms you own. Requires an API key."""
+    try:
+        result = _api("GET", "/api/v1/worlds")
+        return json.dumps(result, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return _error(e)
+
+
+@mcp.tool()
+def rosh_set_room_code(slug: str, code: str) -> str:
+    """Replace the starting code of a room you own. Requires an API key with write scope.
+
+    The live room keeps its current state until it is reset; use rosh_room_do to change
+    it now.
+
+    Args:
+        slug: the room's slug (one of yours)
+        code: the new starting Rosh code
+    """
+    try:
+        return json.dumps(_api("PUT", f"/api/v1/worlds/{slug}", {"code": code}), indent=2)
+    except Exception as e:  # noqa: BLE001
+        return _error(e)
+
+
+@mcp.tool()
+def rosh_room_do(room: str, rosh: str, stop_on_refusal: bool = True) -> str:
+    """Send Rosh lines to a live room and report what each one did.
+
+    Each line is checked by the room and either CONFIRMED (with the things it created,
+    updated or deleted) or REFUSED (with a reason). Everyone viewing the room sees the
+    change at once. Needs an API key with the 'world' scope to change a room; read
+    rosh_room_guide for the lines a room understands. Write Rosh, not English.
+
+    Args:
+        room: "owner/slug" or the room's link, e.g. "rosh/blocks"
+        rosh: one or more Rosh lines, one per line (blank lines and # comments are skipped)
+        stop_on_refusal: stop at the first refused line (default true)
+    """
+    lines = [ln.strip() for ln in rosh.splitlines()]
+    lines = [ln for ln in lines if ln and not ln.startswith("#")]
+    if not lines:
+        return json.dumps({"error": True, "detail": "No Rosh lines to send."})
+    results = []
+    info: dict = {}
+    try:
+        with _room_socket(room) as (ws, info, _):
+            for i, line in enumerate(lines):
+                request_id = f"mcp-{os.getpid()}-{i}"
+                ws.send(json.dumps({"type": "ROSH_COMMAND", "command": line, "request_id": request_id}))
+                answer, said = _await_answer(ws, request_id)
+                results.append(_brief_answer(line, answer, said))
+                if stop_on_refusal and not results[-1]["ok"]:
+                    break
+    except Exception as e:  # noqa: BLE001
+        code = getattr(getattr(e, "rcvd", None), "code", None)
+        if code == 4403:
+            # The room closes the socket on a change from someone who may only look.
+            results.append({"line": lines[len(results)], "ok": False, "reason": "look_only",
+                            "message": "You may only look in this room (its rules keep changes to its "
+                                       "owner, or your key lacks the 'world' scope), so nothing changed."})
+        elif not results:
+            return _error(e)
+        else:
+            results.append({"error": True, "detail": f"{type(e).__name__}: {e}"})
+    done = sum(1 for r in results if r.get("ok"))
+    summary = {"room": f"{info.get('owner')}/{info.get('slug')}", "sent": len(results),
+               "confirmed": done, "refused": len(results) - done,
+               "not_sent": len(lines) - len(results), "results": results}
+    return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+def rosh_room_look(room: str) -> str:
+    """Read a live room as text: its things and their properties, and what you may do there.
+
+    Works for any public room; private rooms need a key that can open them.
+
+    Args:
+        room: "owner/slug" or the room's link, e.g. "rosh/museum"
+    """
+    try:
+        with _room_socket(room) as (_, info, connected):
+            pass
+    except Exception as e:  # noqa: BLE001
+        return _error(e)
+    state = connected.get("state") or {}
+    may = connected.get("may") or {}
+    out = {
+        "room": f"{info.get('owner')}/{info.get('slug')}",
+        "name": info.get("name"),
+        "url": f"{API_BASE}/world/{info.get('owner')}/{info.get('slug')}",
+        "you_may": sorted(k for k, v in may.items() if v),
+        "things": _brief_things(state.get("objects") or {}),
+    }
+    meta = state.get("meta") or {}
+    if meta:
+        out["room_settings"] = meta
+    look = _room_look_lines(info.get("owner"), info.get("slug"))
+    if look:
+        out["room_look"] = look
+    notes = _layout_notes(out["things"], look.get("camera"))
+    if notes:
+        out["layout_notes"] = notes
+    return json.dumps(out, indent=2)
+
+
+DEFAULT_CAMERA = "0 1.7 12 -> 0 1.4 0"
+
+
+def _num(value, default: float = 0.0) -> float:
+    try:
+        return float(str(value).split()[0])
+    except (TypeError, ValueError, IndexError):
+        return default
+
+
+def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
+    """What a visitor would notice, worked out from positions and sizes (no rendering):
+    things that overlap, things one behind another from where visitors stand (their
+    signs pile up), and things outside the first view."""
+    import math
+
+    placed = {}
+    for name, p in things.items():
+        if str(p.get("visible", "true")).lower() == "false":
+            continue
+        placed[name] = (_num(p.get("x")), _num(p.get("z")), max(_num(p.get("size"), 1.0), 0.1),
+                        bool(p.get("label")))
+    notes: list[str] = []
+    for name, p in sorted(things.items()):
+        if p.get("y") is None or name not in placed:
+            continue
+        y, size = _num(p.get("y")), placed[name][2]
+        if y < size / 2 - 0.01:
+            notes.append(f"{name} is partly underground: y = {y:g} is the height of its middle and it is "
+                         f"{size:g} across. Remove y to stand it on the ground (forget {name}.y), "
+                         f"or set y to at least {size / 2:g}.")
+    names = sorted(placed)
+    for i, a in enumerate(names):
+        ax, az, asz, _ = placed[a]
+        for b in names[i + 1:]:
+            bx, bz, bsz, _ = placed[b]
+            if math.hypot(ax - bx, az - bz) < (asz + bsz) / 2 * 0.9:
+                notes.append(f"{a} and {b} overlap (centres {math.hypot(ax - bx, az - bz):.1f} m apart, "
+                             f"sizes {asz:g} and {bsz:g}).")
+    cam = camera or DEFAULT_CAMERA
+    try:
+        eye, target = [[float(v) for v in part.split()] for part in cam.split("->")]
+        ex, ez, tx, tz = eye[0], eye[2], target[0], target[2]
+    except (ValueError, IndexError):
+        return notes
+    facing = math.atan2(tx - ex, -(tz - ez))
+    seen = []
+    for name, (x, z, size, labelled) in placed.items():
+        dist = math.hypot(x - ex, z - ez)
+        if dist < 0.5:
+            continue
+        bearing = math.atan2(x - ex, -(z - ez)) - facing
+        bearing = math.degrees((bearing + math.pi) % (2 * math.pi) - math.pi)
+        if abs(bearing) > 35:
+            notes.append(f"{name} is outside the first view (about {abs(bearing):.0f} degrees to the "
+                         f"{'right' if bearing > 0 else 'left'} of where visitors look).")
+        else:
+            seen.append((name, bearing, dist, size, labelled))
+    for i, (a, ab, ad, asz, al) in enumerate(seen):
+        for b, bb, bd, bsz, bl in seen[i + 1:]:
+            near, far = (a, b) if ad < bd else (b, a)
+            gap = abs(ab - bb)
+            # Apparent half-widths in degrees, plus room for a sign.
+            reach = math.degrees(math.atan2(asz / 2, ad)) + math.degrees(math.atan2(bsz / 2, bd))
+            if gap < max(reach, 4.0 if (al and bl) else 0):
+                notes.append(f"From where visitors stand, {near} is in front of {far}"
+                             + (" and their signs overlap" if (al and bl) else "")
+                             + f" (only {gap:.0f} degrees apart). Move one sideways (x).")
+    if notes and not camera:
+        notes.append(f"(No `# camera:` line, so the default view {DEFAULT_CAMERA} was assumed.)")
+    return notes
+
+
+def _room_look_lines(owner: str, slug: str) -> dict:
+    """The room's own header lines (`# sky:`, `# ground:`, `# camera:`, `# fog:`,
+    `# visual:`), read from the starting code its page carries (`const spaceCode`)."""
+    import re
+
+    try:
+        with httpx.Client(timeout=20, headers={"User-Agent": "RoshMCP/0.2"}) as client:
+            page = client.get(f"{API_BASE}/world/{owner}/{slug}").text
+        m = re.search(r'const spaceCode = ("(?:[^"\\]|\\.)*")', page)
+        code = json.loads(m.group(1)) if m else ""
+    except Exception:  # noqa: BLE001
+        return {}
+    found: dict = {}
+    for line in code.splitlines():
+        h = re.match(r"\s*#\s*(sky|ground|camera|fog|visual):\s*(.+?)\s*$", line)
+        if h:
+            found.setdefault(h.group(1), h.group(2))
+    return found
 
 
 def main():
