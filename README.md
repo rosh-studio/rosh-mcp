@@ -50,9 +50,9 @@ Same config format — add to your MCP settings file.
 
 ### Get an API Key
 
-1. Create an account at [rosh.cloud](https://rosh.cloud)
-2. Go to Settings → API Keys
-3. Create a key with `read,write,world` scopes (`world` lets it change rooms)
+Go to [rosh.cloud/account/keys](https://rosh.cloud/account/keys) (sign in first),
+choose **For an AI agent (MCP)** and **Make key**. The page shows the key once,
+with the `claude mcp add` command and the JSON above already filled in.
 
 `rosh_room_guide` needs no key, and `rosh_room_look` works without one on public
 rooms; everything else needs `ROSH_API_KEY`.
