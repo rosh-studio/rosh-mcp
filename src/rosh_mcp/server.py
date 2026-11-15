@@ -30,7 +30,7 @@ API_KEY = os.environ.get("ROSH_API_KEY", "")
 
 def _headers() -> dict[str, str]:
     h = {
-        "User-Agent": "RoshMCP/0.2",
+        "User-Agent": "RoshMCP/0.3",
         "Content-Type": "application/json",
     }
     if API_KEY:
@@ -312,7 +312,7 @@ def _room_socket(room: str):
     # relayed server, keep the address this client was given.
     base = API_BASE.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = base + ws_url[ws_url.index("/ws/"):]
-    headers = {"User-Agent": "RoshMCP/0.2"}
+    headers = {"User-Agent": "RoshMCP/0.3"}
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
     with connect(ws_url, additional_headers=headers, open_timeout=20, max_size=32 * 1024 * 1024) as ws:
@@ -672,7 +672,7 @@ def _room_look_lines(owner: str, slug: str) -> dict:
     import re
 
     try:
-        with httpx.Client(timeout=20, headers={"User-Agent": "RoshMCP/0.2"}) as client:
+        with httpx.Client(timeout=20, headers={"User-Agent": "RoshMCP/0.3"}) as client:
             page = client.get(f"{API_BASE}/world/{owner}/{slug}").text
         m = re.search(r'const spaceCode = ("(?:[^"\\]|\\.)*")', page)
         code = json.loads(m.group(1)) if m else ""
