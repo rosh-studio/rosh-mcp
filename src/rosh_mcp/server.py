@@ -369,11 +369,25 @@ def _brief_answer(line: str, answer: dict | None, said: list[str]) -> dict:
     return out
 
 
+LOOK_MAX_THINGS = 150
+LOOK_MAX_VALUE = 300
+
+
 def _brief_things(objects: dict) -> dict:
-    """The room's things without bookkeeping fields."""
+    """The room's things without bookkeeping fields, long values shortened."""
     hidden = {"uuid", "type", "object_type", "created_by"}
-    return {name: {k: v for k, v in (props or {}).items() if k not in hidden}
-            for name, props in sorted(objects.items())}
+    out = {}
+    for name, props in sorted(objects.items()):
+        brief = {}
+        for k, v in (props or {}).items():
+            if k in hidden:
+                continue
+            text = v if isinstance(v, str) else json.dumps(v, default=str)
+            if len(text) > LOOK_MAX_VALUE:
+                v = text[:LOOK_MAX_VALUE] + f"... ({len(text)} characters)"
+            brief[k] = v
+        out[name] = brief
+    return out
 
 
 def _error(e: Exception) -> str:
@@ -495,13 +509,17 @@ def rosh_room_do(room: str, rosh: str, stop_on_refusal: bool = True) -> str:
 
 
 @mcp.tool()
-def rosh_room_look(room: str) -> str:
-    """Read a live room as text: its things and their properties, and what you may do there.
+def rosh_room_look(room: str, names: str = "") -> str:
+    """Read a live room as text: its things and their properties, what you may do there,
+    and layout notes (overlaps, things hidden from where visitors stand, things underground).
 
-    Works for any public room; private rooms need a key that can open them.
+    Works for any public room; private rooms need a key that can open them. A big room
+    lists its first 150 things; ask for others by name.
 
     Args:
         room: "owner/slug" or the room's link, e.g. "rosh/museum"
+        names: optional: only these things, comma-separated; a name ending in * matches
+               every name starting with it (e.g. "stone_*, sign")
     """
     try:
         with _room_socket(room) as (_, info, connected):
@@ -517,13 +535,26 @@ def rosh_room_look(room: str) -> str:
         "you_may": sorted(k for k, v in may.items() if v),
         "things": _brief_things(state.get("objects") or {}),
     }
+    everything = out["things"]
+    wanted = [n.strip() for n in names.split(",") if n.strip()]
+    if wanted:
+        def chosen(name: str) -> bool:
+            return any(name == w or (w.endswith("*") and name.startswith(w[:-1])) for w in wanted)
+        out["things"] = {n: p for n, p in everything.items() if chosen(n)}
+    elif len(everything) > LOOK_MAX_THINGS:
+        out["things"] = dict(list(everything.items())[:LOOK_MAX_THINGS])
+        out["more"] = (f"{len(everything) - LOOK_MAX_THINGS} more things not listed "
+                       f"({len(everything)} in all); ask for them with names=...")
+    out["count"] = len(everything)
     meta = state.get("meta") or {}
     if meta:
         out["room_settings"] = meta
     look = _room_look_lines(info.get("owner"), info.get("slug"))
     if look:
         out["room_look"] = look
-    notes = _layout_notes(out["things"], look.get("camera"))
+    notes = _layout_notes(everything, look.get("camera"))
+    if len(notes) > 40:
+        notes = notes[:40] + [f"... and {len(notes) - 40} more notes."]
     if notes:
         out["layout_notes"] = notes
     return json.dumps(out, indent=2)

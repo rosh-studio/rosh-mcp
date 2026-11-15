@@ -290,3 +290,19 @@ def test_layout_notes_warn_when_y_sinks_a_thing():
     notes = " | ".join(s._layout_notes({"sun": {"x": 0, "z": 0, "y": 0, "size": 10},
                                         "lamp": {"x": 20, "z": 0, "y": 3, "size": 1}}, None))
     assert "sun is partly underground" in notes and "lamp is partly underground" not in notes
+
+
+def test_brief_things_shortens_long_values():
+    s = load()
+    out = s._brief_things({"sign": {"label": "x" * 2000, "uuid": "u", "size": 1}})
+    assert out["sign"]["label"].endswith("(2000 characters)") and "uuid" not in out["sign"]
+    assert len(out["sign"]["label"]) < 400
+
+
+@live
+def test_look_can_ask_for_some_things_by_name(room):
+    s, ref, slug = room
+    s.rosh_room_do(ref, "create object pick_1\ncreate object pick_2")
+    out = json.loads(s.rosh_room_look(ref, names="pick_*, plinth"))
+    assert set(out["things"]) == {"pick_1", "pick_2", "plinth"}
+    assert out["count"] >= 3
