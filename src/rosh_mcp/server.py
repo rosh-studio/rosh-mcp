@@ -299,9 +299,35 @@ STARTING CODE vs LIVE CHANGES
 """
 
 
+_MY_NAME: dict = {}
+
+
+def _my_username() -> Optional[str]:
+    """The key holder's username, for a bare slug ("one of mine"). EXP-A02 builders
+    couldn't address their own rooms: the list didn't show the owner (16 Nov)."""
+    if "name" in _MY_NAME:
+        return _MY_NAME["name"]
+    name = None
+    try:
+        rooms = _api("GET", "/api/v1/worlds").get("worlds", [])
+        name = next((w.get("owner") for w in rooms if w.get("owner")), None)
+        if not name and rooms:
+            # Older servers don't list the owner; an empty update changes nothing and says who.
+            name = _api("PUT", f"/api/v1/worlds/{rooms[0]['slug']}", {}).get("owner")
+    except Exception:  # noqa: BLE001
+        name = None
+    _MY_NAME["name"] = name
+    return name
+
+
 def _room_ref(room: str) -> tuple[str, str]:
-    """'owner/slug', '@owner/slug' or a rosh.cloud room link -> (owner, slug)."""
+    """'owner/slug', '@owner/slug', a rosh.cloud room link, or a bare slug of one of
+    your own rooms -> (owner, slug)."""
     text = room.strip().rstrip("/")
+    if "/" not in text and text and API_KEY:
+        mine = _my_username()
+        if mine:
+            return mine, text
     if "://" in text:
         text = text.split("://", 1)[1].split("/", 1)[-1]
     parts = [p for p in text.split("/") if p]
@@ -461,9 +487,16 @@ def rosh_create_room(slug: str, code: str = "", name: Optional[str] = None) -> s
 
 @mcp.tool()
 def rosh_list_rooms() -> str:
-    """List the rooms you own. Requires an API key."""
+    """List the rooms you own, each with its full address ("room": owner/slug) to pass to
+    rosh_room_look and rosh_room_do. Requires an API key."""
     try:
         result = _api("GET", "/api/v1/worlds")
+        owner = _my_username()
+        for w in result.get("worlds", []):
+            w.setdefault("owner", owner)
+            if w.get("owner"):
+                w["room"] = f"{w['owner']}/{w['slug']}"
+                w["url"] = f"{API_BASE}/world/{w['owner']}/{w['slug']}"
         return json.dumps(result, indent=2)
     except Exception as e:  # noqa: BLE001
         return _error(e)
@@ -522,7 +555,7 @@ def rosh_room_do(room: str, rosh: str, stop_on_refusal: bool = True) -> str:
     rosh_room_guide for the lines a room understands. Write Rosh, not English.
 
     Args:
-        room: "owner/slug" or the room's link, e.g. "rosh/blocks"
+        room: "owner/slug", the room's link, or just the slug of one of your own rooms
         rosh: one or more Rosh lines, one per line (blank lines and # comments are skipped)
         stop_on_refusal: stop at the first refused line (default true)
     """
@@ -568,7 +601,7 @@ def rosh_room_look(room: str, names: str = "") -> str:
     lists its first 150 things; ask for others by name.
 
     Args:
-        room: "owner/slug" or the room's link, e.g. "rosh/museum"
+        room: "owner/slug", the room's link, or just the slug of one of your own rooms
         names: optional: only these things, comma-separated; a name ending in * matches
                every name starting with it (e.g. "stone_*, sign")
     """

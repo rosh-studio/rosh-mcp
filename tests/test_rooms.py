@@ -40,7 +40,7 @@ def test_room_ref_reads_every_form(given, owner, slug):
     assert load()._room_ref(given) == (owner, slug)
 
 
-@pytest.mark.parametrize("bad", ["blocks", "a/b/c", "", "https://rosh.cloud/"])
+@pytest.mark.parametrize("bad", ["a/b/c", "", "https://rosh.cloud/"])
 def test_room_ref_refuses_what_it_cannot_read(bad):
     with pytest.raises(ValueError):
         load()._room_ref(bad)
@@ -453,3 +453,12 @@ def test_look_tells_what_a_model_really_is():
     assert "chess_set" in look["models"]
     assert "replica" in look["models"]["chess_set"]["description"].lower()
     assert "CC BY" in look["models"]["chess_set"]["licence"]
+
+
+@live
+def test_a_bare_slug_means_one_of_my_rooms_and_the_list_gives_full_addresses(room):
+    # EXP-A02 (16 Nov): builders couldn't reach their own rooms by slug.
+    s, ref, slug = room
+    assert json.loads(s.rosh_room_look(slug))["room"] == ref
+    listed = {w["slug"]: w for w in json.loads(s.rosh_list_rooms())["worlds"]}
+    assert listed[slug]["room"] == ref
