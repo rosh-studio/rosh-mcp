@@ -610,7 +610,10 @@ def rosh_room_look(room: str, names: str = "") -> str:
     used = {shape: records[shape] for shape in sorted(shapes) if shape in records}
     if used:
         out["models"] = used   # what each model really is: use these facts, don't guess
-    notes = _layout_notes(everything, look.get("camera"), look.get("ground"))
+    # ROSH_MCP_NOTES=off hides layout notes (for experiments: the room still checks
+    # every line, it just doesn't explain what a visitor would notice).
+    notes = [] if os.environ.get("ROSH_MCP_NOTES", "").lower() == "off" else \
+        _layout_notes(everything, look.get("camera"), look.get("ground"))
     if len(notes) > 40:
         notes = notes[:40] + [f"... and {len(notes) - 40} more notes."]
     if notes:
