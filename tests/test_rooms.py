@@ -431,3 +431,25 @@ def test_a_bright_pond_on_grass_is_not_called_hard_to_see():
                             "0 4 16 -> 0 0.8 0", "#8fbf6a")
     text = " | ".join(notes)
     assert "path is flat (0.02 m high)" in text and "pond is flat" not in text
+
+
+def test_a_sign_on_a_plinth_that_something_stands_on_is_noted():
+    # Kitchen run (A01-1, 16 Nov): labels on the plinths covered the objects on them.
+    s = load()
+    things = {"plinth_3": {"x": 0, "z": 0, "height": 1, "width": 1.4, "depth": 1.4, "label": "Coal range: 1800s"},
+              "coal_range": {"x": 0, "z": 0, "y": 1.6, "height": 1.2, "width": 0.9}}
+    notes = " | ".join(s._layout_notes(things, "0 1.8 9 -> 0 1 0"))
+    assert "plinth_3's sign floats where coal_range stands" in notes
+    things["coal_range"]["label"] = "Coal range"
+    del things["plinth_3"]["label"]
+    assert not any("floats where" in n for n in s._layout_notes(things, "0 1.8 9 -> 0 1 0"))
+
+
+@live
+def test_look_tells_what_a_model_really_is():
+    # Chessmen run (A01-4): "a generic chess set"; the record says a scan of a replica.
+    s = load()
+    look = json.loads(s.rosh_room_look("rosh/museum"))
+    assert "chess_set" in look["models"]
+    assert "replica" in look["models"]["chess_set"]["description"].lower()
+    assert "CC BY" in look["models"]["chess_set"]["licence"]

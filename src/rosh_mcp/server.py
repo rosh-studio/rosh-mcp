@@ -269,7 +269,9 @@ LIMITS (a value outside is REFUSED with the range; nothing is clamped)
   or a code like #3366cc. Anything else is refused with the nearest names.
   True/false (wireframe, visible, locked): true, false, yes, no, on, off.
   Shapes: cube, sphere, cylinder, cone, torus, plane, pyramid, or a model the
-  room knows (rosh/museum's: amphora, cauldron, sword, torc...).
+  room knows (rosh/museum's: amphora, cauldron, sword, torc...). rosh_room_look
+  lists each model a room uses under "models", with what it really is (a scan,
+  a replica, an artist's model) and its credit: use that, don't guess.
 
 YOUR OWN FACTS
   A room keeps any property you set (set stone_1.year to 800), and refuses
@@ -603,6 +605,11 @@ def rosh_room_look(room: str, names: str = "") -> str:
     look = _room_look_lines(info.get("owner"), info.get("slug"))
     if look:
         out["room_look"] = look
+    shapes = {str(p.get("shape", "")).strip('"').lower() for p in everything.values()}
+    records = _model_records()
+    used = {shape: records[shape] for shape in sorted(shapes) if shape in records}
+    if used:
+        out["models"] = used   # what each model really is: use these facts, don't guess
     notes = _layout_notes(everything, look.get("camera"), look.get("ground"))
     if len(notes) > 40:
         notes = notes[:40] + [f"... and {len(notes) - 40} more notes."]
@@ -650,6 +657,34 @@ def _colour_hex(word) -> Optional[tuple[int, int, int]]:
             base = _COLOUR_HEX[text[len(word):]]
             return tuple(round(int(base[i:i + 2], 16) + (toward - int(base[i:i + 2], 16)) * t) for i in (0, 2, 4))
     return None
+
+
+_MODEL_RECORDS: dict = {}
+
+
+def _model_records() -> dict:
+    """What each model the server knows really is (static/js/rosh-museum-objects.js, the
+    same file the browser, Unity and Unreal read): description, credit, licence.
+    The chessmen run (A01-4) called the museum's model "a generic chess set" because
+    nothing told it the model is a scan of a replica of the Lewis pieces."""
+    import re
+    if _MODEL_RECORDS:
+        return {k: v for k, v in _MODEL_RECORDS.items() if k != "_none"}
+    try:
+        with httpx.Client(timeout=10, headers={"User-Agent": "RoshMCP/0.3"}) as client:
+            js = client.get(f"{API_BASE}/static/js/rosh-museum-objects.js").text
+        body = js[js.index("const KNOWN_OBJECTS = {"):]
+        for name, block in re.findall(r"^    ([a-z_][a-z0-9_]*): \{(.*?)^    \},", body, re.M | re.S):
+            record = {}
+            for key in ("description", "credit", "licence", "source"):
+                m = re.search(key + r':\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)+)', block)
+                if m:
+                    record[key] = "".join(json.loads(part) for part in re.findall(r'"(?:[^"\\]|\\.)*"', m.group(1)))
+            if record:
+                _MODEL_RECORDS[name] = record
+    except Exception:  # noqa: BLE001 - no records, no model notes
+        _MODEL_RECORDS["_none"] = {}
+    return {k: v for k, v in _MODEL_RECORDS.items() if k != "_none"}
 
 
 def _layout_notes(things: dict, camera: Optional[str], ground: Optional[str] = None) -> list[str]:
@@ -710,6 +745,22 @@ def _layout_notes(things: dict, camera: Optional[str], ground: Optional[str] = N
                 notes.append(f"{name} is flat ({high:g} m high) and close to the ground's colour "
                              f"({p.get('color')} on {ground}): visitors may not see it. Use a colour that "
                              "stands out from the ground, or raise it a little.")
+    # A labelled thing with something standing on it: its sign floats where that
+    # thing stands and covers it (the kitchen run labelled the plinths, 16 Nov).
+    for low in sorted(placed):
+        if not placed[low][3]:
+            continue
+        lx, lz, lsz, _ = placed[low]
+        for high in sorted(placed):
+            if high == low:
+                continue
+            hx, hz, hsz, _ = placed[high]
+            on_top = 0 <= span[high][0] - span[low][1] <= 0.3
+            if on_top and math.hypot(lx - hx, lz - hz) < (lsz + hsz) / 2:
+                notes.append(f"{low}'s sign floats where {high} stands, so it covers {high}. Put the sign on "
+                             f"{high} instead (forget {low}.label), or raise it: set {low}.label_lift to "
+                             f"{span[high][1] - span[low][1] + 0.4:.1f}.")
+                break
     names = sorted(placed)
     for i, a in enumerate(names):
         ax, az, asz, _ = placed[a]
