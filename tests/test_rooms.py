@@ -380,3 +380,14 @@ def test_width_height_depth_are_kept_and_capped(room):
     assert [r["ok"] for r in out["results"]] == [True, True, True, True, False], out
     slab = json.loads(s.rosh_room_look(ref, names="slab_1"))["things"]["slab_1"]
     assert float(slab["height"]) == 2.5 and float(slab["width"]) == 0.8 and float(slab["depth"]) == 0.3
+
+
+def test_a_thing_on_its_plinth_is_not_a_clash():
+    # Agent run A01-1 (16 Nov): every object on a plinth was reported as overlapping and hidden.
+    s = load()
+    things = {"plinth_1": {"x": 0, "z": 0, "height": 1, "width": 1.6, "depth": 1.6},
+              "iron": {"x": 0, "z": 0, "y": 1.2, "size": 0.4, "label": "Flat iron"},
+              "buried": {"x": 0.2, "z": 0, "size": 0.5}}
+    notes = " | ".join(s._layout_notes(things, "0 1.7 12 -> 0 1.4 0"))
+    assert "iron" not in notes                     # stands on the plinth
+    assert "buried and plinth_1 overlap" in notes  # sits inside it

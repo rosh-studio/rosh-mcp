@@ -615,14 +615,24 @@ def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
 
     placed = {}
     tall: dict = {}
+    span: dict = {}   # (bottom, top) in metres
     for name, p in things.items():
-        if str(p.get("visible", "true")).lower() == "false":
+        if str(p.get("visible", "true")).lower() in ("false", "no", "off", "0"):
             continue
         size = max(_num(p.get("size"), 1.0), 0.1)
         # Across the ground: the wider of width and depth; up: height (each falls back to size).
         across = max(_num(p.get("width"), size), _num(p.get("depth"), size), 0.1)
         tall[name] = max(_num(p.get("height"), size), 0.1)
+        # With no y a thing stands on the ground; a y is its middle.
+        bottom = _num(p.get("y")) - tall[name] / 2 if p.get("y") is not None else 0.0
+        span[name] = (bottom, bottom + tall[name])
         placed[name] = (_num(p.get("x")), _num(p.get("z")), across, bool(p.get("label")))
+
+    def stacked(a: str, b: str) -> bool:
+        """One stands on (or floats above) the other: no overlap, and neither hides the other
+        (an object on its plinth; agent run A01-1 found these reported as clashes, 16 Nov)."""
+        (a0, a1), (b0, b1) = span[a], span[b]
+        return a0 >= b1 - 0.05 or b0 >= a1 - 0.05
     notes: list[str] = []
     for name, p in sorted(things.items()):
         if p.get("y") is None or name not in placed:
@@ -637,7 +647,7 @@ def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
         ax, az, asz, _ = placed[a]
         for b in names[i + 1:]:
             bx, bz, bsz, _ = placed[b]
-            if math.hypot(ax - bx, az - bz) < (asz + bsz) / 2 * 0.9:
+            if not stacked(a, b) and math.hypot(ax - bx, az - bz) < (asz + bsz) / 2 * 0.9:
                 notes.append(f"{a} and {b} overlap (centres {math.hypot(ax - bx, az - bz):.1f} m apart, "
                              f"sizes {asz:g} and {bsz:g}).")
     cam = camera or DEFAULT_CAMERA
@@ -661,6 +671,8 @@ def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
             seen.append((name, bearing, dist, size, labelled))
     for i, (a, ab, ad, asz, al) in enumerate(seen):
         for b, bb, bd, bsz, bl in seen[i + 1:]:
+            if stacked(a, b):
+                continue
             near, far = (a, b) if ad < bd else (b, a)
             gap = abs(ab - bb)
             # Apparent half-widths in degrees, plus room for a sign.
