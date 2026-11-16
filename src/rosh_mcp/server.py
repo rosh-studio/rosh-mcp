@@ -262,6 +262,14 @@ LIMITS (a value outside is REFUSED with the range; nothing is clamped)
   x and z: -500 to 500        y: -50 to 500         size, width, height, depth: 0.01 to 100
   spin, bounce, pulse: -20 to 20                     opacity: 0 to 1
   A door may only lead to a room on this site (a path like /world/rosh/blocks).
+  Colours: red, green, blue, yellow, orange, purple, pink, brown, black, white,
+  grey, gold, silver, navy, teal, lime, coral, crimson, violet, indigo, maroon,
+  olive, aqua, cyan, magenta, sapphire, lavender, turquoise, mustard, emerald,
+  amber, fuchsia; each also as dark-, deep-, light-, pale- (darkred, palegreen);
+  or a code like #3366cc. Anything else is refused with the nearest names.
+  True/false (wireframe, visible, locked): true, false, yes, no, on, off.
+  Shapes: cube, sphere, cylinder, cone, torus, plane, pyramid, or a model the
+  room knows (rosh/museum's: amphora, cauldron, sword, torc...).
 
 YOUR OWN FACTS
   A room keeps any property you set (set stone_1.year to 800), and refuses
