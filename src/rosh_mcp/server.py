@@ -603,7 +603,7 @@ def rosh_room_look(room: str, names: str = "") -> str:
     look = _room_look_lines(info.get("owner"), info.get("slug"))
     if look:
         out["room_look"] = look
-    notes = _layout_notes(everything, look.get("camera"))
+    notes = _layout_notes(everything, look.get("camera"), look.get("ground"))
     if len(notes) > 40:
         notes = notes[:40] + [f"... and {len(notes) - 40} more notes."]
     if notes:
@@ -621,7 +621,38 @@ def _num(value, default: float = 0.0) -> float:
         return default
 
 
-def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
+_COLOUR_HEX: dict = {}
+
+
+def _colour_hex(word) -> Optional[tuple[int, int, int]]:
+    """A colour word or code as (r, g, b), from the room server's own colour table."""
+    import re
+    text = str(word or "").strip().strip('"').lower()
+    m = re.fullmatch(r"#?([0-9a-f]{6}|[0-9a-f]{3})", text)
+    if m:
+        h = m.group(1) if len(m.group(1)) == 6 else "".join(c * 2 for c in m.group(1))
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    if not _COLOUR_HEX:
+        try:
+            with httpx.Client(timeout=10, headers={"User-Agent": "RoshMCP/0.3"}) as client:
+                js = client.get(f"{API_BASE}/static/js/rosh-colors.js").text
+            table = js[js.index("const COLOR_MAP = {"):js.index("};", js.index("const COLOR_MAP = {"))]
+            _COLOUR_HEX.update({n: h for n, h in re.findall(r"^\s+([a-z]+):\s*0x([0-9a-f]{6})", table, re.M)})
+        except Exception:  # noqa: BLE001 - no table, no colour notes
+            _COLOUR_HEX["_none"] = ""
+    h = _COLOUR_HEX.get(text)
+    if h:
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    # The browser's shades (rosh-colors.js SHADE_QUALIFIERS): "palebrown", "darkred".
+    for word, toward, t in (("dark", 0, 0.45), ("deep", 0, 0.45), ("light", 255, 0.45), ("pale", 255, 0.65),
+                            ("bright", 0, 0.0), ("vivid", 0, 0.0)):
+        if text.startswith(word) and _COLOUR_HEX.get(text[len(word):]):
+            base = _COLOUR_HEX[text[len(word):]]
+            return tuple(round(int(base[i:i + 2], 16) + (toward - int(base[i:i + 2], 16)) * t) for i in (0, 2, 4))
+    return None
+
+
+def _layout_notes(things: dict, camera: Optional[str], ground: Optional[str] = None) -> list[str]:
     """What a visitor would notice, worked out from positions and sizes (no rendering):
     things that overlap, things one behind another from where visitors stand (their
     signs pile up), and things outside the first view."""
@@ -634,9 +665,14 @@ def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
         if str(p.get("visible", "true")).lower() in ("false", "no", "off", "0"):
             continue
         size = max(_num(p.get("size"), 1.0), 0.1)
-        # Across the ground: the wider of width and depth; up: height (each falls back to size).
-        across = max(_num(p.get("width"), size), _num(p.get("depth"), size), 0.1)
-        tall[name] = max(_num(p.get("height"), size), 0.1)
+        if p.get("door_to") or str(p.get("shape", "")).strip('"').lower() == "door":
+            # Drawn as a door with its frame: about 1.1 wide and 2.1 high at size 1
+            # (measured in the browser, 16 Nov). The castle run's door hid its gatehouse.
+            across, tall[name] = 1.1 * size, 2.1 * size
+        else:
+            # Across the ground: the wider of width and depth; up: height (each falls back to size).
+            across = max(_num(p.get("width"), size), _num(p.get("depth"), size), 0.1)
+            tall[name] = max(_num(p.get("height"), size), 0.1)
         # With no y a thing stands on the ground; a y is its middle.
         bottom = _num(p.get("y")) - tall[name] / 2 if p.get("y") is not None else 0.0
         span[name] = (bottom, bottom + tall[name])
@@ -656,6 +692,24 @@ def _layout_notes(things: dict, camera: Optional[str]) -> list[str]:
             notes.append(f"{name} is partly underground: y = {y:g} is the height of its middle and it is "
                          f"{height:g} tall. Remove y to stand it on the ground (forget {name}.y), "
                          f"or set y to at least {height / 2:g}.")
+    # Flat and close to the ground's colour: a path or a rug visitors won't see
+    # (the garden run's cream path on pale grass, 16 Nov).
+    ground_rgb = _colour_hex(ground) if ground else None
+    if ground_rgb:
+        for name, p in sorted(things.items()):
+            if name not in tall or tall[name] > 0.15 or not p.get("color"):
+                continue
+            rgb = _colour_hex(p.get("color"))
+            def light(c):
+                return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255
+            # Close in colour, or close in brightness: seen at a low angle, a flat thing
+            # as bright as the ground disappears even in another hue.
+            apart = sum((x - y) ** 2 for x, y in zip(rgb, ground_rgb)) ** 0.5 if rgb else 999
+            if rgb and (apart < 90 or (apart < 140 and abs(light(rgb) - light(ground_rgb)) < 0.12)):
+                high = _num(p.get("height"), _num(p.get("size"), 1.0))
+                notes.append(f"{name} is flat ({high:g} m high) and close to the ground's colour "
+                             f"({p.get('color')} on {ground}): visitors may not see it. Use a colour that "
+                             "stands out from the ground, or raise it a little.")
     names = sorted(placed)
     for i, a in enumerate(names):
         ax, az, asz, _ = placed[a]

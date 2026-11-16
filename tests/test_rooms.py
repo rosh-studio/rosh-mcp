@@ -400,3 +400,34 @@ def test_a_thing_on_its_plinth_is_not_a_clash():
     notes = " | ".join(s._layout_notes(things, "0 1.7 12 -> 0 1.4 0"))
     assert "iron" not in notes                     # stands on the plinth
     assert "buried and plinth_1 overlap" in notes  # sits inside it
+
+
+def test_a_door_near_the_viewer_that_hides_something_is_noted():
+    # Agent run A01-2 castle (16 Nov): the door hid the gatehouse; doors are drawn
+    # about 1.1 x 2.1 at size 1, not size x size.
+    s = load()
+    things = {"door_back": {"x": -5, "z": 14, "size": 2, "door_to": "/world/rosh/blocks", "label": "Back"},
+              "gatehouse": {"x": -9, "y": 2, "z": 0, "width": 3, "height": 4, "depth": 3, "label": "1. GATEHOUSE"}}
+    notes = " | ".join(s._layout_notes(things, "0 3 22 -> 0 2 0"))
+    assert "door_back is in front of gatehouse" in notes
+
+
+def test_a_flat_thing_the_colour_of_the_ground_is_noted():
+    # Agent run A01-3 garden: a cream path on pale grass.
+    s = load()
+    notes = " | ".join(s._layout_notes({"path_1": {"x": 0, "z": 0, "height": 0.02, "width": 6, "depth": 2,
+                                                   "color": "#e9e4c0"},
+                                        "bed": {"x": 5, "z": 0, "height": 0.5, "color": "#e9e4c0"}},
+                                       "0 4 16 -> 0 0.8 0", "#d8f0b0"))
+    assert "path_1 is flat" in notes and "bed is flat" not in notes
+    assert not any("flat" in n for n in s._layout_notes({"path_1": {"height": 0.02, "color": "#333333"}},
+                                                         None, "#d8f0b0"))
+
+
+def test_a_bright_pond_on_grass_is_not_called_hard_to_see():
+    s = load()
+    notes = s._layout_notes({"pond": {"x": -6, "z": 6, "height": 0.1, "color": "aqua", "size": 3},
+                             "path": {"x": 4, "z": 0, "height": 0.02, "color": "palebrown", "width": 6}},
+                            "0 4 16 -> 0 0.8 0", "#8fbf6a")
+    text = " | ".join(notes)
+    assert "path is flat (0.02 m high)" in text and "pond is flat" not in text
