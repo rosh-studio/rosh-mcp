@@ -290,8 +290,10 @@ WHO MAY CHANGE IT (visitors with the link, no key)
 STARTING CODE vs LIVE CHANGES
   rosh_create_room takes the room's starting code (the lines above, one per
   line). Lines that can't run are listed under "problems" in its reply (and
-  in rosh_room_look as code_problems); fix them with rosh_set_room_code. rosh_room_do changes the live room. rosh_set_room_code replaces the
-  starting code; the live room keeps its changes until it is reset.
+  in rosh_room_look as code_problems). rosh_set_room_code replaces the code and
+  resets the live room to it (live additions go); rosh_room_do changes the live
+  room without touching the code. Small fixes: rosh_room_do. A rethink:
+  rosh_set_room_code.
 """
 
 
@@ -466,20 +468,32 @@ def rosh_list_rooms() -> str:
 
 
 @mcp.tool()
-def rosh_set_room_code(slug: str, code: str) -> str:
-    """Replace the starting code of a room you own. Requires an API key with write scope.
+def rosh_set_room_code(slug: str, code: str, reset_now: bool = True) -> str:
+    """Replace the starting code of a room you own, and (by default) reset the live room to
+    it, so rosh_room_look shows the new code. Requires an API key with write and world scopes.
 
-    The live room keeps its current state until it is reset; use rosh_room_do to change
-    it now.
+    Resetting puts the room back to its code: anything added live since (by you or by
+    visitors) goes. Pass reset_now=false to save the code without touching the live room.
 
     Args:
         slug: the room's slug (one of yours)
         code: the new starting Rosh code
+        reset_now: reset the live room to the new code (default true)
     """
     try:
-        return json.dumps(_api("PUT", f"/api/v1/worlds/{slug}", {"code": code}), indent=2)
+        result = _api("PUT", f"/api/v1/worlds/{slug}", {"code": code})
     except Exception as e:  # noqa: BLE001
         return _error(e)
+    if result.get("success") and reset_now and result.get("owner"):
+        # The live room keeps its state until it is reset; an agent that looked after
+        # saving saw the old room (agent runs A01, 16 Nov).
+        reset = json.loads(rosh_room_do(f"{result['owner']}/{slug}", "reset world"))
+        first = (reset.get("results") or [{}])[0]
+        result["reset"] = "done: the live room now matches the code" if first.get("ok") else (
+            f"not done ({first.get('reason') or reset.get('detail')}): the live room still shows the old code")
+    elif result.get("success"):
+        result["reset"] = "not asked: the live room still shows the old code until it is reset"
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool()

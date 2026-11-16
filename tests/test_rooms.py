@@ -243,10 +243,19 @@ def test_a_look_only_room_refuses_a_guest_plainly():
 
 
 @live
-def test_set_room_code_replaces_the_starting_code(room):
-    s, ref, slug = room
-    out = json.loads(s.rosh_set_room_code(slug, "create object other\n"))
-    assert out.get("success"), out
+def test_set_room_code_resets_the_live_room_to_the_new_code():
+    # Agent runs A01 (16 Nov): after replacing the code, look still showed the old room.
+    s = load()
+    slug = f"mcp-test-{uuid.uuid4().hex[:8]}"
+    ref = json.loads(s.rosh_create_room(slug, "create object first_thing\n"))["room"]
+    assert "first_thing" in json.loads(s.rosh_room_look(ref))["things"]
+    out = json.loads(s.rosh_set_room_code(slug, "create object second_thing\n"))
+    assert out["success"] and out["reset"].startswith("done"), out
+    assert list(json.loads(s.rosh_room_look(ref))["things"]) == ["second_thing"]
+    kept = json.loads(s.rosh_set_room_code(slug, "create object third_thing\n", reset_now=False))
+    assert "not asked" in kept["reset"]
+    assert list(json.loads(s.rosh_room_look(ref))["things"]) == ["second_thing"]
+    s.rosh_delete_room(slug)
 
 
 @live
