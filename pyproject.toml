@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rosh-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server for Rosh: AI agents build live 3D rooms in Rosh (no rendering needed), and compile and publish Rosh programs"
 readme = "README.md"
 license = "MIT"
